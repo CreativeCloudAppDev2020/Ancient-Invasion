@@ -155,6 +155,21 @@ class Level:
         self.name: str = name
         self.__stages: list = stages
         self.is_cleared: bool = False
+        self.times_beaten: int = 0  # initial value
+
+    def get_beaten(self):
+        # type: () -> None
+        """
+        Make enemies stronger once this stage is beaten.
+        :return: None
+        """
+
+        for stage in self.__stages:
+            for enemy in stage.get_enemies_list():
+                for i in range(2 ** self.times_beaten):
+                    enemy.level_up()
+
+        self.times_beaten += 1
 
     def get_stages(self):
         # type: () -> list
@@ -174,6 +189,10 @@ class LevelStage:
         # type: (list) -> None
         self.__enemies_list: list = enemies_list
         self.is_cleared: bool = False
+
+    def get_enemies_list(self):
+        # type: () -> list
+        return self.__enemies_list
 
     def clone(self):
         # type: () -> LevelStage
@@ -207,13 +226,17 @@ class Hero:
     MIN_DEBUFFS: int = 0
     MAX_DEBUFFS: int = 10
 
-    def __init__(self, hero_id, name, element, type_, max_hp, max_magic_points, attack_power, defense, attack_speed):
-        # type: (str, str, str, str, mpf, mpf, mpf, mpf, mpf) -> None
+    def __init__(self, hero_id, name, element, type_, rating,
+                 max_hp, max_magic_points, attack_power, defense, attack_speed):
+        # type: (str, str, str, str, int, mpf, mpf, mpf, mpf, mpf) -> None
         self.hero_id: str = hero_id
         self.name: str = name
         self.element: str = element if element in self.POSSIBLE_ELEMENTS else self.POSSIBLE_ELEMENTS[0]
         self.type: str = type_ if type_ in self.POSSIBLE_HERO_TYPES else self.POSSIBLE_HERO_TYPES[0]
+        self.rating: int = rating if self.MIN_RATING <= rating <= self.MAX_RATING else self.MIN_RATING
         self.level: int = self.MIN_LEVEL
+        self.max_level: int = triangular(self.rating) * 10
+        self.limit_break_applied: bool = False
         self.exp: mpf = mpf("0")
         self.required_exp: mpf = mpf("1e6")
         self.curr_hp: mpf = max_hp
@@ -234,6 +257,21 @@ class Hero:
         self.shield_amount: mpf = mpf("0")
         self.__buffs: list = []
         self.__debuffs: list = []
+
+    def apply_limit_break(self):
+        # type: () -> bool
+        if not self.limit_break_applied and self.level == self.max_level and self.rating == self.MAX_RATING:
+            self.limit_break_applied = True
+            self.max_level = float('inf')
+            return True
+        return False
+
+    def level_up(self):
+        # type: () -> None
+        while self.exp >= self.required_exp:
+            self.level += 1
+            self.required_exp *= mpf("10") ** self.level
+            # TODO: Increase the strength of the hero
 
     def get_is_alive(self):
         # type: () -> bool
@@ -307,6 +345,12 @@ class ActiveSkill(Skill):
 class PassiveSkill(Skill):
     """
     This class contains attributes of passive skills heroes have.
+    """
+
+
+class LeaderSkill(Skill):
+    """
+    This class contains attributes of leader skills heroes have.
     """
 
 
@@ -393,6 +437,12 @@ class StatIncrease:
 class Scroll(Item):
     """
     This class contains attributes of a scroll used to summon heroes.
+    """
+
+
+class LimitBreakShard(Item):
+    """
+    This class contains attributes of a limit break shard to apply limit break to a hero in this game.
     """
 
 
