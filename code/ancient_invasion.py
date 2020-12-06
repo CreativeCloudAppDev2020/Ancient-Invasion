@@ -72,6 +72,44 @@ class Action:
         # type: (str) -> None
         self.name: str = name if name in self.POSSIBLE_NAMES else self.POSSIBLE_NAMES[0]
 
+    def execute(self, user, target, skill_to_use=None):
+        # type: (Hero, Hero, Skill or None) -> bool
+        if self.name == "NORMAL ATTACK":
+            if user == target:
+                return False
+
+            user_actual_crit_rate: mpf = user.crit_rate + user.battle_crit_rate_up
+            if user_actual_crit_rate > user.MAX_CRIT_RATE:
+                user_actual_crit_rate = user.MAX_CRIT_RATE
+
+            is_crit: bool = random.random() < user_actual_crit_rate
+            user_actual_attack_power: mpf = user.attack_power * (1 + user.battle_attack_power_percentage_up / 100 -
+                                                                 user.battle_attack_power_percentage_down / 100)
+            target_actual_defense: mpf = target.defense * (1 + target.battle_defense_percentage_up / 100 -
+                                                           target.battle_defense_percentage_down / 100)
+            raw_damage: mpf = user_actual_attack_power
+            if is_crit:
+                raw_damage *= user.crit_damage
+
+            raw_damage -= target_actual_defense
+            damage: mpf = raw_damage if raw_damage > 0 else 0
+            target.curr_hp -= damage
+            return True
+
+        elif self.name == "NORMAL HEAL":
+            if user != target:
+                return False
+
+            heal_amount: mpf = 0.05 * user.max_hp
+            user.curr_hp += heal_amount
+            return True
+
+        elif self.name == "USE SKILL":
+            if isinstance(skill_to_use, Skill):
+                """
+                TODO: Check the type of skill being used and implement what happens when a skill is used.
+                """
+
     def clone(self):
         # type: () -> Action
         return copy.deepcopy(self)
@@ -81,6 +119,29 @@ class Arena:
     """
     This class contains attributes of the battle arena where the player can face AI controlled trainers as opponents.
     """
+
+    def __init__(self, available_opponent_trainers):
+        # type: (list) -> None
+        self.__available_opponent_trainers: list = available_opponent_trainers
+
+    def add_opponent_trainer(self, opponent_trainer):
+        # type: (Trainer) -> None
+        self.__available_opponent_trainers.append(opponent_trainer)
+
+    def remove_opponent_trainer(self, opponent_trainer):
+        # type: (Trainer) -> bool
+        if opponent_trainer in self.__available_opponent_trainers:
+            self.__available_opponent_trainers.remove(opponent_trainer)
+            return True
+        return False
+
+    def get_available_opponent_trainers(self):
+        # type: () -> list
+        return self.__available_opponent_trainers
+
+    def clone(self):
+        # type: () -> Arena
+        return copy.deepcopy(self)
 
 
 class Battle:
@@ -285,6 +346,7 @@ class Hero:
         self.secondary_awaken_bonus: SecondaryAwakenBonus = secondary_awaken_bonus
         self.has_awakened: bool = False
         self.has_secondary_awakened: bool = False
+        self.curr_team: Team or None = None  # initial value
 
         # Initialising variables for stat bonus and penalties for battles from both self and ally runes which increase
         # allies' stats, passive skills, leader skills, buffs, and debuffs.
@@ -301,6 +363,7 @@ class Hero:
         # has something to do with branding effects.
         self.battle_damage_percentage_reduced: mpf = mpf("0")
         self.battle_damage_per_turn: mpf = mpf("0")
+        self.battle_max_hp_percentage_down: mpf = mpf("0")
         self.battle_attack_power_percentage_down: mpf = mpf("0")
         self.battle_defense_percentage_down: mpf = mpf("0")
         self.battle_attack_speed_percentage_down: mpf = mpf("0")
@@ -402,11 +465,48 @@ class AwakenBonus:
     This class contains attributes of the awaken bonus gained for awakening a hero.
     """
 
+    def __init__(self, max_hp_percentage_up, max_magic_points_percentage_up, attack_power_percentage_up,
+                 defense_percentage_up, attack_speed_up, crit_rate_up, crit_damage_up, resistance_up, accuracy_up,
+                 new_skill_gained):
+        # type: (mpf, mpf, mpf, mpf,mpf, mpf, mpf, mpf, mpf, Skill) -> None
+        self.max_hp_percentage_up: mpf = max_hp_percentage_up
+        self.max_magic_points_percentage_up: mpf = max_magic_points_percentage_up
+        self.attack_power_percentage_up: mpf = attack_power_percentage_up
+        self.defense_percentage_up: mpf = defense_percentage_up
+        self.attack_speed_up: mpf = attack_speed_up
+        self.crit_rate_up: mpf = crit_rate_up
+        self.crit_damage_up: mpf = crit_damage_up
+        self.resistance_up: mpf = resistance_up
+        self.accuracy_up: mpf = accuracy_up
+        self.new_skill_gained: Skill = new_skill_gained
+
+    def clone(self):
+        # type: () -> AwakenBonus
+        return copy.deepcopy(self)
+
 
 class SecondaryAwakenBonus:
     """
     This class contains attributes of the secondary awaken bonus for secondary awakening a hero.
     """
+
+    def __init__(self, max_hp_percentage_up, max_magic_points_percentage_up, attack_power_percentage_up,
+                 defense_percentage_up, new_upgraded_skills_list):
+        # type: (mpf, mpf, mpf, mpf, list) -> None
+        self.max_hp_percentage_up: mpf = max_hp_percentage_up
+        self.max_magic_points_percentage_up: mpf = max_magic_points_percentage_up
+        self.attack_power_percentage_up: mpf = attack_power_percentage_up
+        self.defense_percentage_up: mpf = defense_percentage_up
+        self.__new_upgraded_skills_list: list = new_upgraded_skills_list  # a list of new skills the hero will have
+        # which will be the upgraded versions of the initial skills the hero has.
+
+    def get_new_upgraded_skills_list(self):
+        # type: () -> list
+        return self.__new_upgraded_skills_list
+
+    def clone(self):
+        # type: () -> SecondaryAwakenBonus
+        return copy.deepcopy(self)
 
 
 class Skill:
@@ -596,6 +696,7 @@ class Team:
         # type: (Hero) -> bool
         if len(self.__heroes_list) < self.MAX_HEROES:
             self.__heroes_list.append(hero)
+            hero.curr_team = self
             return True
         return False
 
@@ -608,6 +709,8 @@ class Team:
                     self.leader = self.__heroes_list[0]
                 else:
                     self.leader = None
+
+            hero.curr_team = None
 
             return True
         return False
@@ -921,6 +1024,7 @@ class Player:
         self.arena_losses: int = 0
         self.arena_points: int = 1000  # initial value
         self.rank: Rank = Rank("BEGINNER")
+        self.update_rank()
         self.battle_team: Team = Team()
         self.item_inventory: Inventory = Inventory()
 
@@ -931,7 +1035,18 @@ class Player:
         :return: None
         """
 
-        # TODO: Add code to update player's rank based on arena points
+        if self.arena_points < 1100:
+            self.rank = Rank("BEGINNER")
+        elif 1100 <= self.arena_points < 1200:
+            self.rank = Rank("CHALLENGER")
+        elif 1200 <= self.arena_points < 1400:
+            self.rank = Rank("FIGHTER")
+        elif 1400 <= self.arena_points < 1700:
+            self.rank = Rank("CONQUEROR")
+        elif 1700 <= self.arena_points < 2100:
+            self.rank = Rank("GUARDIAN")
+        else:
+            self.rank = Rank("LEGEND")
 
     def clone(self):
         # type: () -> Player
@@ -1286,8 +1401,8 @@ class DamageMultiplier:
                  multiplier_to_enemy_attack_power, multiplier_to_self_defense, multiplier_to_enemy_defense,
                  multiplier_to_self_max_magic_points, multiplier_to_enemy_max_magic_points,
                  multiplier_to_self_attack_speed, multiplier_to_enemy_attack_speed,
-                 multiplier_to_current_self_max_hp_percentage, multiplier_to_self_max_hp_percentage_loss,
-                 multiplier_to_current_enemies_max_hp_percentage, multiplier_to_enemies_max_hp_percentage_loss,
+                 multiplier_to_current_self_hp_percentage, multiplier_to_self_hp_percentage_loss,
+                 multiplier_to_current_enemies_hp_percentage, multiplier_to_enemies_hp_percentage_loss,
                  multiplier_to_number_of_dead_allies, multiplier_to_number_of_dead_enemies,
                  multiplier_to_number_of_turns_gained, multiplier_to_number_of_self_buffs,
                  multiplier_to_number_of_enemies_debuffs, damage_increase_percentage_to_enemies_without_buffs):
@@ -1302,10 +1417,10 @@ class DamageMultiplier:
         self.multiplier_to_enemy_max_magic_points: mpf = multiplier_to_enemy_max_magic_points
         self.multiplier_to_self_attack_speed: mpf = multiplier_to_self_attack_speed
         self.multiplier_to_enemy_attack_speed: mpf = multiplier_to_enemy_attack_speed
-        self.multiplier_to_current_self_max_hp_percentage: mpf = multiplier_to_current_self_max_hp_percentage
-        self.multiplier_to_self_max_hp_percentage_loss: mpf = multiplier_to_self_max_hp_percentage_loss
-        self.multiplier_to_current_enemies_max_hp_percentage: mpf = multiplier_to_current_enemies_max_hp_percentage
-        self.multiplier_to_enemies_max_hp_percentage_loss: mpf = multiplier_to_enemies_max_hp_percentage_loss
+        self.multiplier_to_current_self_hp_percentage: mpf = multiplier_to_current_self_hp_percentage
+        self.multiplier_to_self_hp_percentage_loss: mpf = multiplier_to_self_hp_percentage_loss
+        self.multiplier_to_current_enemies_hp_percentage: mpf = multiplier_to_current_enemies_hp_percentage
+        self.multiplier_to_enemies_hp_percentage_loss: mpf = multiplier_to_enemies_hp_percentage_loss
         self.multiplier_to_number_of_dead_allies: mpf = multiplier_to_number_of_dead_allies
         self.multiplier_to_number_of_dead_enemies: mpf = multiplier_to_number_of_dead_enemies
         self.multiplier_to_number_of_turns_gained: mpf = multiplier_to_number_of_turns_gained
@@ -1315,19 +1430,80 @@ class DamageMultiplier:
 
     def calculate_normal_raw_damage_without_enemy_defense(self, user, target):
         # type: (Hero, Hero) -> mpf
-        return mpf("0")  # To be updated
+        if isinstance(user.curr_team, Team) and isinstance(target.curr_team, Team):
+            user_team: Team = user.curr_team
+            target_team: Team = target.curr_team
+            actual_user_max_hp: mpf = user.max_hp * (1 + user.battle_max_hp_percentage_up / 100 -
+                                                     user.battle_max_hp_percentage_down / 100)
+            actual_user_attack_power: mpf = user.attack_power * (1 + user.battle_attack_power_percentage_up / 100 -
+                                                                 user.battle_attack_power_percentage_down / 100)
+            actual_user_defense: mpf = user.defense * (1 + user.battle_defense_percentage_up / 100 -
+                                                       user.battle_defense_percentage_down / 100)
+            actual_user_attack_speed: mpf = user.attack_speed * (1 + user.battle_attack_speed_percentage_up / 100 -
+                                                                 user.battle_attack_speed_percentage_down / 100)
+            actual_target_max_hp: mpf = target.max_hp * (1 + target.battle_max_hp_percentage_up / 100 -
+                                                     target.battle_max_hp_percentage_down / 100)
+            actual_target_attack_power: mpf = target.attack_power * (1 + target.battle_attack_power_percentage_up / 100 -
+                                                                 target.battle_attack_power_percentage_down / 100)
+            actual_target_defense: mpf = target.defense * (1 + target.battle_defense_percentage_up / 100 -
+                                                       target.battle_defense_percentage_down / 100)
+            actual_target_attack_speed: mpf = target.attack_speed * (1 + target.battle_attack_speed_percentage_up / 100 -
+                                                                 target.battle_attack_speed_percentage_down / 100)
+            current_user_hp_percentage: mpf = (user.curr_hp / user.max_hp) * 100
+            current_target_hp_percentage: mpf = (target.curr_hp / target.max_hp) * 100
+            user_hp_percentage_loss: mpf = 100 - current_user_hp_percentage
+            target_hp_percentage_loss: mpf = 100 - current_target_hp_percentage
+            number_of_dead_allies: int = 0  # initial value
+            for hero in user_team.get_heroes_list():
+                if hero != user and not hero.get_is_alive():
+                    number_of_dead_allies += 1
+
+            number_of_dead_enemies: int = 0  # initial value
+            for hero in target_team.get_heroes_list():
+                if hero != target and not target.get_is_alive():
+                    number_of_dead_enemies += 1
+
+            number_of_turns_gained: int = user.turns_gained
+            number_of_user_buffs: int = len(user.get_buffs())
+            number_of_target_debuffs: int = len(target.get_debuffs())
+            target_without_buffs: int = 1 if len(target.get_buffs()) == 0 else 0
+            target_additional_damage_percentage_received: mpf = target.battle_additional_damage_percentage_received
+            return (actual_user_max_hp * self.multiplier_to_self_max_hp + actual_target_max_hp *
+                    self.multiplier_to_enemy_max_hp + actual_user_attack_power * (self.multiplier_to_self_attack_power +
+                    (actual_user_attack_speed * self.multiplier_to_self_attack_speed)) + actual_target_attack_power *
+                    (self.multiplier_to_enemy_attack_power + (actual_target_attack_speed *
+                    self.multiplier_to_enemy_attack_speed)) + actual_user_defense * self.multiplier_to_self_defense +
+                    actual_target_defense * self.multiplier_to_enemy_defense + user.max_magic_points *
+                    self.multiplier_to_self_max_magic_points + target.max_magic_points *
+                    self.multiplier_to_enemy_max_magic_points) * (1 + current_user_hp_percentage *
+                    self.multiplier_to_current_self_hp_percentage) * (1 + current_target_hp_percentage *
+                    self.multiplier_to_current_enemies_hp_percentage) * (1 + user_hp_percentage_loss *
+                    self.multiplier_to_self_hp_percentage_loss) * (1 + target_hp_percentage_loss *
+                    self.multiplier_to_enemies_hp_percentage_loss) * (1 + number_of_dead_allies *
+                    self.multiplier_to_number_of_dead_allies) * (1 + number_of_dead_enemies *
+                    self.multiplier_to_number_of_dead_enemies) * (1 + number_of_turns_gained *
+                    self.multiplier_to_number_of_turns_gained) * (1 + number_of_user_buffs *
+                    self.multiplier_to_number_of_self_buffs) * (1 + number_of_target_debuffs *
+                    self.multiplier_to_number_of_enemies_debuffs) * (1 + target_without_buffs *
+                    self.damage_increase_percentage_to_enemies_without_buffs) * \
+                    (1 + target_additional_damage_percentage_received / 100)
+        return mpf("0")  # attack is unsuccessful
 
     def calculate_normal_raw_damage(self, user, target):
         # type: (Hero, Hero) -> mpf
-        return self.calculate_normal_raw_damage_without_enemy_defense(user, target) - target.defense
+        actual_target_defense: mpf = target.defense * (1 + target.battle_defense_percentage_up / 100 -
+                                                       target.battle_defense_percentage_down / 100)
+        return self.calculate_normal_raw_damage_without_enemy_defense(user, target) - actual_target_defense
 
     def calculate_critical_raw_damage_without_enemy_defense(self, user, target):
         # type: (Hero, Hero) -> mpf
-        return mpf("0")  # To be updated
+        return self.calculate_normal_raw_damage_without_enemy_defense(user, target) * (1 + user.crit_damage)
 
     def calculate_critical_raw_damage(self, user, target):
         # type: (Hero, Hero) -> mpf
-        return self.calculate_critical_raw_damage_without_enemy_defense(user, target) - target.defense
+        actual_target_defense: mpf = target.defense * (1 + target.battle_defense_percentage_up / 100 -
+                                                       target.battle_defense_percentage_down / 100)
+        return self.calculate_critical_raw_damage_without_enemy_defense(user, target) - actual_target_defense
 
     def clone(self):
         # type: () -> DamageMultiplier
