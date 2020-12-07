@@ -82,7 +82,7 @@ class Action:
             if user_actual_crit_rate > user.MAX_CRIT_RATE:
                 user_actual_crit_rate = user.MAX_CRIT_RATE
 
-            is_crit: bool = random.random() < user_actual_crit_rate
+            is_crit: bool = random.random() <= user_actual_crit_rate
             user_actual_attack_power: mpf = user.attack_power * (1 + user.battle_attack_power_percentage_up / 100 -
                                                                  user.battle_attack_power_percentage_down / 100)
             target_actual_defense: mpf = target.defense * (1 + target.battle_defense_percentage_up / 100 -
@@ -106,9 +106,90 @@ class Action:
 
         elif self.name == "USE SKILL":
             if isinstance(skill_to_use, Skill):
-                """
-                TODO: Check the type of skill being used and implement what happens when a skill is used.
-                """
+                # TODO: fix this elif branch by checking whether the skill attacks or heals and the team the user and the target are in
+                # Attack the enemy if the skill is an active skill or a special power
+                if isinstance(skill_to_use, ActiveSkill):
+                    user_actual_crit_rate: mpf = user.crit_rate + user.battle_crit_rate_up
+                    if user_actual_crit_rate > user.MAX_CRIT_RATE:
+                        user_actual_crit_rate = user.MAX_CRIT_RATE
+
+                    target_team: Team = target.curr_team
+                    if not skill_to_use.is_aoe:
+                        if user not in target_team.get_heroes_list():
+                            raw_damage: mpf = skill_to_use.damage_multiplier.\
+                                calculate_normal_raw_damage_without_enemy_defense(user, target)
+                            is_crit: bool = random.random() <= user_actual_crit_rate
+                            if is_crit:
+                                raw_damage *= user.crit_damage
+
+                            if not skill_to_use.does_ignore_enemies_defense:
+                                raw_damage -= target.defense
+
+                            damage: mpf = raw_damage if raw_damage > 0 else 0
+                            target_is_invincible: bool = False
+                            for buff in target.get_buffs():
+                                if buff.name == "INVINCIBLE":
+                                    target_is_invincible = True
+
+                            if target_is_invincible:
+                                damage = 0
+
+                            target.curr_hp -= damage
+                        else:
+                            user.curr_hp += skill_to_use.heal_amount_to_self
+                            if user.curr_hp > user.max_hp:
+                                user.curr_hp = user.max_hp
+
+                            target.curr_hp += skill_to_use.heal_amount_to_allies
+                            if target.curr_hp > target.max_hp:
+                                target.curr_hp = target.max_hp
+                    else:
+                        for enemy_target in target_team.get_heroes_list():
+                            raw_damage: mpf = skill_to_use.damage_multiplier. \
+                                calculate_normal_raw_damage_without_enemy_defense(user, enemy_target)
+                            is_crit: bool = random.random() <= user_actual_crit_rate
+                            if is_crit:
+                                raw_damage *= user.crit_damage
+
+                            if not skill_to_use.does_ignore_enemies_defense:
+                                raw_damage -= enemy_target.defense
+
+                            damage: mpf = raw_damage if raw_damage > 0 else 0
+                            enemy_target_is_invincible: bool = False
+                            for buff in enemy_target.get_buffs():
+                                if buff.name == "INVINCIBLE":
+                                    enemy_target_is_invincible = True
+
+                            if enemy_target_is_invincible:
+                                damage = 0
+
+                            enemy_target.curr_hp -= damage
+
+            elif isinstance(skill_to_use, SpecialPower):
+                if skill_to_use.cooltime == 0:
+                    user_actual_crit_rate: mpf = user.crit_rate + user.battle_crit_rate_up
+                    if user_actual_crit_rate > user.MAX_CRIT_RATE:
+                        user_actual_crit_rate = user.MAX_CRIT_RATE
+
+                    raw_damage: mpf = skill_to_use.damage_multiplier. \
+                        calculate_normal_raw_damage_without_enemy_defense(user, target)
+                    is_crit: bool = random.random() <= user_actual_crit_rate
+                    if is_crit:
+                        raw_damage *= user.crit_damage
+
+                    if not skill_to_use.does_ignore_enemies_defense:
+                        raw_damage -= target.defense
+
+                    damage: mpf = raw_damage if raw_damage > 0 else 0
+                    target_is_invincible: bool = False
+                    for buff in target.get_buffs():
+                        if buff.name == "INVINCIBLE":
+                            target_is_invincible = True
+
+                    if target_is_invincible:
+                        damage = 0
+
+                    target.curr_hp -= damage
 
     def clone(self):
         # type: () -> Action
@@ -345,6 +426,8 @@ class Hero:
         self.awaken_bonus: AwakenBonus = awaken_bonus
         self.secondary_awaken_bonus: SecondaryAwakenBonus = secondary_awaken_bonus
         self.has_awakened: bool = False
+        self.is_locked: bool = False  # initial value. This variable determines whether this hero is locked from
+        # being used as power up material or not
         self.has_secondary_awakened: bool = False
         self.curr_team: Team or None = None  # initial value
 
@@ -405,6 +488,17 @@ class Hero:
             return True
         return False
 
+    def recover_magic_points(self):
+        # type: () -> None
+        self.curr_magic_points += self.max_magic_points / 12
+        if self.curr_magic_points >= self.max_magic_points:
+            self.curr_magic_points = self.max_magic_points
+
+    def restore(self):
+        # type: () -> None
+        self.curr_hp = self.max_hp
+        self.curr_magic_points = self.max_magic_points
+
     def level_up(self):
         # type: () -> None
         while self.exp >= self.required_exp:
@@ -413,7 +507,34 @@ class Hero:
 
             self.level += 1
             self.required_exp *= mpf("10") ** self.level
-            # TODO: Add code to increase the strength of the hero
+            self.attack_power *= triangular(self.level)
+            self.max_hp *= triangular(self.level)
+            self.max_magic_points *= triangular(self.level)
+            self.defense *= triangular(self.level)
+            self.restore()
+
+    def normal_attack(self, other):
+        # type: (Hero) -> None
+        action: Action = Action("NORMAL ATTACK")
+        action.execute(self, other)
+
+    def normal_heal(self, other):
+        # type: (Hero) -> None
+        action: Action = Action("NORMAL HEAL")
+        action.execute(self, other)
+
+    def use_skill(self, other, skill):
+        # type: (Hero, Skill) -> bool
+        if skill not in self.__skills:
+            return False
+
+        if self.curr_magic_points < skill.magic_points_cost:
+            return False
+
+        action: Action = Action("USE SKILL")
+        action.execute(self, other, skill)
+        self.curr_magic_points -= skill.magic_points_cost
+        return True
 
     def get_is_alive(self):
         # type: () -> bool
@@ -533,8 +654,8 @@ class ActiveSkill(Skill):
     def __init__(self, name, description, magic_points_cost, damage_multiplier, does_ignore_enemies_defense,
                  buffs_to_self, buffs_to_allies, debuffs_to_enemies, does_remove_self_debuffs, does_remove_allies_debuffs,
                  does_remove_enemies_buffs, self_attack_gauge_increase, enemies_attack_gauge_down, heal_amount_to_self,
-                 heal_amount_to_allies, does_balance_allies_hp_bar):
-        # type: (str, str, mpf, DamageMultiplier, bool, list, list, list, bool, bool, bool, mpf, mpf, mpf, mpf, bool) -> None
+                 heal_amount_to_allies, does_balance_allies_hp_bar, is_aoe):
+        # type: (str, str, mpf, DamageMultiplier, bool, list, list, list, bool, bool, bool, mpf, mpf, mpf, mpf, bool, bool) -> None
         Skill.__init__(self, name, description, magic_points_cost)
         self.damage_multiplier: DamageMultiplier = damage_multiplier
         self.does_ignore_enemies_defense: bool = does_ignore_enemies_defense
@@ -549,6 +670,7 @@ class ActiveSkill(Skill):
         self.heal_amount_to_self: mpf = heal_amount_to_self
         self.heal_amount_to_allies: mpf = heal_amount_to_allies
         self.does_balance_allies_hp_bar: bool = does_balance_allies_hp_bar
+        self.is_aoe: bool = is_aoe
 
     def get_buffs_to_self(self):
         # type: () -> list
@@ -661,11 +783,13 @@ class SpecialPower(Skill):
     This class contains attributes of special powers heroes have.
     """
 
-    def __init__(self, name, description, max_cooltime):
-        # type: (str, str, int) -> None
+    def __init__(self, name, description, damage_multiplier, max_cooltime, does_ignore_enemies_defense):
+        # type: (str, str, DamageMultiplier, int, bool) -> None
         Skill.__init__(self, name, description, mpf("0"))
+        self.damage_multiplier: DamageMultiplier = damage_multiplier
         self.cooltime: int = max_cooltime
         self.max_cooltime: int = max_cooltime
+        self.does_ignore_enemies_defense: bool = does_ignore_enemies_defense
 
 
 class Team:
@@ -1380,12 +1504,21 @@ class Reward:
     This class contains attributes of rewards gained for doing something in the game.
     """
 
-    def __init__(self, player_coin_gain, player_exp_gain, hero_exp_gain, player_items_gain):
-        # type: (mpf, mpf, mpf, list) -> None
+    def __init__(self, player_coin_gain, player_exp_gain, hero_exp_gain, player_items_gain, player_heroes_gain):
+        # type: (mpf, mpf, mpf, list, list) -> None
         self.player_coin_gain: mpf = player_coin_gain
         self.player_exp_gain: mpf = player_exp_gain
         self.hero_exp_gain: mpf = hero_exp_gain
-        self.player_items_gain: list = player_items_gain
+        self.__player_items_gain: list = player_items_gain
+        self.__player_heroes_gain: list = player_heroes_gain
+
+    def get_player_items_gain(self):
+        # type: () -> list
+        return self.__player_items_gain
+
+    def get_player_heroes_gain(self):
+        # type: () -> list
+        return self.__player_heroes_gain
 
     def clone(self):
         # type: () -> Reward
@@ -1453,16 +1586,10 @@ class DamageMultiplier:
             current_target_hp_percentage: mpf = (target.curr_hp / target.max_hp) * 100
             user_hp_percentage_loss: mpf = 100 - current_user_hp_percentage
             target_hp_percentage_loss: mpf = 100 - current_target_hp_percentage
-            number_of_dead_allies: int = 0  # initial value
-            for hero in user_team.get_heroes_list():
-                if hero != user and not hero.get_is_alive():
-                    number_of_dead_allies += 1
-
-            number_of_dead_enemies: int = 0  # initial value
-            for hero in target_team.get_heroes_list():
-                if hero != target and not target.get_is_alive():
-                    number_of_dead_enemies += 1
-
+            number_of_dead_allies: int = len([hero for hero in user_team.get_heroes_list() if hero != user and
+                                              not hero.get_is_alive()])
+            number_of_dead_enemies: int = len([hero for hero in target_team.get_heroes_list() if hero != target and
+                                              not target.get_is_alive()])
             number_of_turns_gained: int = user.turns_gained
             number_of_user_buffs: int = len(user.get_buffs())
             number_of_target_debuffs: int = len(target.get_debuffs())
