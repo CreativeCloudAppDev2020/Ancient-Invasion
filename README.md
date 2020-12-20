@@ -12,3 +12,5 @@ Understanding how "Ancient Invasion" works will be easier for you if you have he
 
 Python code used to create the game is available in https://github.com/DtjiSoftwareDeveloper/Ancient-Invasion/blob/main/code/ancient_invasion.py.
 It is currently under development.
+
+THIS FAILED PROJECT IS TERMINATED
